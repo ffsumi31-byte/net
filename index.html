@@ -1,0 +1,748 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OBS Live Stream Overlay Pro</title>
+  <style>
+    :root {
+      --primary: #fe2c55;
+      --secondary: #25f4ee;
+      --bg-panel: rgba(18, 18, 24, 0.88);
+      --border-panel: rgba(255, 255, 255, 0.12);
+      --text: #ffffff;
+      --text-muted: #9aa0a6;
+    }
+
+    * {
+      box-sizing: border-box;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      background: transparent !important;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      color: var(--text);
+    }
+
+    /* Backdrop Simulator for Testing */
+    #backdrop-container {
+      position: absolute;
+      inset: 0;
+      z-index: 0;
+      pointer-events: none;
+      transition: background 0.3s ease;
+    }
+
+    .bg-transparent { background: transparent !important; }
+    .bg-checker {
+      background-image: 
+        linear-gradient(45deg, #1f1f23 25%, transparent 25%), 
+        linear-gradient(-45deg, #1f1f23 25%, transparent 25%), 
+        linear-gradient(45deg, transparent 75%, #1f1f23 75%), 
+        linear-gradient(-45deg, transparent 75%, #1f1f23 75%) !important;
+      background-size: 24px 24px !important;
+      background-position: 0 0, 0 12px, 12px -12px, -12px 0px !important;
+      background-color: #121216 !important;
+    }
+    .bg-dark { background: #0b0c10 !important; }
+    .bg-twitch { background: #18141f !important; }
+    .bg-green { background: #00ff00 !important; }
+
+    /* Overlay Stage */
+    #stage {
+      position: absolute;
+      inset: 0;
+      z-index: 10;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      pointer-events: auto;
+    }
+
+    /* Animation Container */
+    #anim-wrapper {
+      position: absolute;
+      cursor: grab;
+      touch-action: none;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      transition: filter 0.25s ease;
+      transform-origin: center center;
+    }
+
+    #anim-wrapper:active { cursor: grabbing; }
+
+    #anim-canvas {
+      display: block;
+      max-width: 100%;
+      max-height: 100%;
+      pointer-events: none;
+    }
+
+    /* Visual Effects */
+    .fx-none { filter: none; }
+    .fx-shadow { filter: drop-shadow(0 12px 28px rgba(0, 0, 0, 0.75)); }
+    .fx-neon { filter: drop-shadow(0 0 16px rgba(254, 44, 85, 0.65)) drop-shadow(0 0 32px rgba(37, 244, 238, 0.45)); }
+
+    /* Gift Banner */
+    #gift-banner {
+      margin-top: 10px;
+      padding: 8px 20px;
+      background: rgba(18, 18, 24, 0.85);
+      border: 1px solid rgba(254, 44, 85, 0.5);
+      border-radius: 30px;
+      backdrop-filter: blur(8px);
+      box-shadow: 0 4px 20px rgba(254, 44, 85, 0.35);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 13px;
+      font-weight: 700;
+      color: #fff;
+      opacity: 0;
+      transform: translateY(12px) scale(0.92);
+      transition: all 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+      pointer-events: none;
+    }
+
+    #gift-banner.show {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+
+    .gift-badge {
+      background: linear-gradient(135deg, #fe2c55, #ff0077);
+      color: white;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    /* Streamer Control HUD */
+    #control-hud {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 100;
+      background: var(--bg-panel);
+      border: 1px solid var(--border-panel);
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-radius: 16px;
+      padding: 12px 20px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      transition: opacity 0.35s ease, transform 0.35s ease;
+    }
+
+    #control-hud.hidden {
+      opacity: 0;
+      pointer-events: none;
+      transform: translateX(-50%) translateY(30px);
+    }
+
+    .hud-badge {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      padding: 4px 10px;
+      border-radius: 20px;
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    .status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #25f4ee;
+      box-shadow: 0 0 8px #25f4ee;
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.5; transform: scale(0.85); }
+    }
+
+    .btn {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      color: #fff;
+      padding: 6px 14px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.2s ease;
+    }
+
+    .btn:hover {
+      background: rgba(255, 255, 255, 0.16);
+      border-color: rgba(255, 255, 255, 0.25);
+      transform: translateY(-1px);
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #fe2c55, #e01b44);
+      border: none;
+      box-shadow: 0 4px 14px rgba(254, 44, 85, 0.4);
+    }
+
+    .hud-divider {
+      width: 1px;
+      height: 24px;
+      background: rgba(255, 255, 255, 0.12);
+    }
+
+    .control-item {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      font-size: 10px;
+      color: var(--text-muted);
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+    }
+
+    select {
+      background: #1e1e26;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      color: #fff;
+      padding: 4px 8px;
+      border-radius: 6px;
+      font-size: 11px;
+      outline: none;
+    }
+
+    input[type="range"] {
+      -webkit-appearance: none;
+      appearance: none;
+      height: 4px;
+      background: rgba(255, 255, 255, 0.2);
+      border-radius: 2px;
+      outline: none;
+      width: 75px;
+    }
+
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: var(--primary);
+      cursor: pointer;
+      box-shadow: 0 0 6px rgba(254, 44, 85, 0.8);
+    }
+
+    #hotkey-tip {
+      position: fixed;
+      top: 14px;
+      right: 18px;
+      background: rgba(18, 18, 24, 0.7);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 20px;
+      padding: 4px 12px;
+      font-size: 11px;
+      color: var(--text-muted);
+      pointer-events: none;
+      backdrop-filter: blur(8px);
+      transition: opacity 0.3s ease;
+      z-index: 100;
+    }
+
+    #hotkey-tip kbd {
+      background: rgba(255, 255, 255, 0.15);
+      padding: 1px 5px;
+      border-radius: 4px;
+      color: #fff;
+    }
+
+    /* Loader */
+    #loader {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: rgba(10, 10, 14, 0.85);
+      z-index: 999;
+      gap: 14px;
+      transition: opacity 0.4s ease;
+    }
+
+    #loader.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .spinner {
+      width: 36px;
+      height: 36px;
+      border: 3px solid rgba(255, 255, 255, 0.15);
+      border-top-color: var(--primary);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+
+  <div id="backdrop-container" class="bg-transparent"></div>
+
+  <div id="loader">
+    <div class="spinner"></div>
+    <div id="loader-msg" style="font-size: 13px; color: #e0e0e0;">Preloading stream overlay...</div>
+  </div>
+
+  <div id="stage">
+    <div id="anim-wrapper" class="fx-none">
+      <canvas id="anim-canvas" width="608" height="1080"></canvas>
+      <div id="gift-banner">
+        <span class="gift-badge">Live Alert</span>
+        <span id="gift-text">✨ Stream Gift Active!</span>
+      </div>
+    </div>
+  </div>
+
+  <div id="hotkey-tip">
+    Press <kbd>H</kbd> to hide HUD &bull; Drag to reposition &bull; <kbd>Space</kbd> trigger
+  </div>
+
+  <div id="control-hud">
+    <div class="hud-badge">
+      <span class="status-dot"></span>
+      <span id="fps-counter">24 FPS</span>
+    </div>
+
+    <button id="btn-play-pause" class="btn btn-primary"><span>⏸ Pause</span></button>
+    <button id="btn-replay" class="btn"><span>↺ Replay</span></button>
+
+    <div class="hud-divider"></div>
+
+    <div class="control-item">
+      <span>Mode</span>
+      <select id="mode-select">
+        <option value="loop-smooth">Seamless Loop</option>
+        <option value="loop-pause" selected>Relaxed (1s rest)</option>
+        <option value="alert-10">Alert every 10s</option>
+        <option value="alert-30">Alert every 30s</option>
+        <option value="alert-60">Alert every 60s</option>
+        <option value="manual">Manual / Spacebar</option>
+      </select>
+    </div>
+
+    <div class="control-item">
+      <span id="speed-label">Speed: 1.0x</span>
+      <input type="range" id="speed-slider" min="0.5" max="2.0" step="0.1" value="1.0">
+    </div>
+
+    <div class="control-item">
+      <span id="scale-label">Scale: 65%</span>
+      <input type="range" id="scale-slider" min="0.25" max="1.5" step="0.05" value="0.65">
+    </div>
+
+    <div class="control-item">
+      <span>Position</span>
+      <select id="pos-select">
+        <option value="center" selected>Center</option>
+        <option value="bottom-right">Bottom-Right</option>
+        <option value="bottom-center">Bottom-Center</option>
+        <option value="bottom-left">Bottom-Left</option>
+        <option value="top-right">Top-Right</option>
+        <option value="top-left">Top-Left</option>
+      </select>
+    </div>
+
+    <div class="control-item">
+      <span>Effect</span>
+      <select id="fx-select">
+        <option value="fx-none" selected>Clean (No FX)</option>
+        <option value="fx-shadow">Studio Shadow</option>
+        <option value="fx-neon">Neon Glow</option>
+      </select>
+    </div>
+
+    <div class="hud-divider"></div>
+
+    <button id="btn-audio" class="btn"><span id="audio-label">🔊 Audio On</span></button>
+
+    <div class="control-item">
+      <span>Backdrop</span>
+      <select id="backdrop-select">
+        <option value="bg-transparent" selected>Transparent (OBS)</option>
+        <option value="bg-checker">Checkerboard Test</option>
+        <option value="bg-dark">Stream Dark</option>
+        <option value="bg-twitch">Twitch Purple</option>
+        <option value="bg-green">Green Screen</option>
+      </select>
+    </div>
+  </div>
+
+  <audio id="audio-track" src="sound.mp3" preload="auto"></audio>
+
+  <script>
+    // --- Query Parameters (for OBS & Netlify integration) ---
+    const params = new URLSearchParams(window.location.search);
+    const isObsMode = params.get('obs') === 'true' || params.get('obs') === '1' || params.get('clean') === '1' || params.get('clean') === 'true';
+    
+    const TOTAL_FRAMES = 89;
+    const FRAME_RATE = 24;
+    const FRAME_DIR = 'frames/';
+    
+    const frames = [];
+    let currentFrame = 0;
+    let isPlaying = true;
+    let playbackSpeed = parseFloat(params.get('speed')) || 1.0;
+    let playbackScale = parseFloat(params.get('scale')) || 0.65;
+    let currentMode = params.get('mode') || 'loop-pause';
+    let currentPos = params.get('pos') || 'center';
+    let currentFx = params.get('fx') || 'fx-none';
+    let audioEnabled = params.get('audio') !== '0';
+    let isWaitingRest = false;
+
+    // DOM
+    const canvas = document.getElementById('anim-canvas');
+    const ctx = canvas.getContext('2d');
+    const wrapper = document.getElementById('anim-wrapper');
+    const hud = document.getElementById('control-hud');
+    const tip = document.getElementById('hotkey-tip');
+    const loader = document.getElementById('loader');
+    const loaderMsg = document.getElementById('loader-msg');
+    const btnPlayPause = document.getElementById('btn-play-pause');
+    const btnReplay = document.getElementById('btn-replay');
+    const btnAudio = document.getElementById('btn-audio');
+    const audioLabel = document.getElementById('audio-label');
+    const audioTrack = document.getElementById('audio-track');
+    const modeSelect = document.getElementById('mode-select');
+    const speedSlider = document.getElementById('speed-slider');
+    const speedLabel = document.getElementById('speed-label');
+    const scaleSlider = document.getElementById('scale-slider');
+    const scaleLabel = document.getElementById('scale-label');
+    const posSelect = document.getElementById('pos-select');
+    const fxSelect = document.getElementById('fx-select');
+    const backdropSelect = document.getElementById('backdrop-select');
+    const backdropContainer = document.getElementById('backdrop-container');
+    const giftBanner = document.getElementById('gift-banner');
+    const giftText = document.getElementById('gift-text');
+    const fpsCounter = document.getElementById('fps-counter');
+
+    if (params.get('text')) {
+      giftText.innerText = params.get('text');
+    }
+
+    // Apply URL params to initial UI
+    speedSlider.value = playbackSpeed;
+    speedLabel.innerText = `Speed: ${playbackSpeed.toFixed(1)}x`;
+    scaleSlider.value = playbackScale;
+    scaleLabel.innerText = `Scale: ${Math.round(playbackScale * 100)}%`;
+    modeSelect.value = currentMode;
+    posSelect.value = currentPos;
+    fxSelect.value = currentFx;
+    wrapper.className = currentFx;
+
+    if (!audioEnabled) {
+      audioLabel.innerText = '🔇 Audio Off';
+    }
+
+    // If OBS Clean mode is requested via URL, permanently hide HUD
+    if (isObsMode) {
+      hud.style.display = 'none';
+      tip.style.display = 'none';
+    }
+
+    // --- Preload Frames ---
+    let loadedCount = 0;
+    function preloadFrames() {
+      for (let i = 1; i <= TOTAL_FRAMES; i++) {
+        const img = new Image();
+        const padIndex = String(i).padStart(4, '0');
+        img.src = `${FRAME_DIR}frame_${padIndex}.png`;
+        img.onload = () => {
+          loadedCount++;
+          loaderMsg.innerText = `Loading frames: ${loadedCount} / ${TOTAL_FRAMES}`;
+          if (loadedCount === TOTAL_FRAMES) onLoaded();
+        };
+        img.onerror = () => {
+          loadedCount++;
+          if (loadedCount === TOTAL_FRAMES) onLoaded();
+        };
+        frames.push(img);
+      }
+    }
+
+    function onLoaded() {
+      loader.classList.add('hidden');
+      applyPosition(currentPos);
+      renderFrame(0);
+      playAudio();
+      requestAnimationFrame(loop);
+    }
+
+    function playAudio() {
+      if (audioEnabled && audioTrack) {
+        audioTrack.currentTime = 0;
+        audioTrack.playbackRate = playbackSpeed;
+        audioTrack.play().catch(() => {});
+      }
+    }
+
+    function renderFrame(idx) {
+      if (!frames[idx] || !frames[idx].complete) return;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(frames[idx], 0, 0, canvas.width, canvas.height);
+    }
+
+    // --- Loop ---
+    let lastTime = performance.now();
+    let frameDuration = 1000 / FRAME_RATE;
+    let timeAcc = 0;
+    let fpsCount = 0;
+    let lastFpsTime = performance.now();
+
+    function loop(now) {
+      const delta = now - lastTime;
+      lastTime = now;
+
+      fpsCount++;
+      if (now - lastFpsTime >= 1000) {
+        const fps = Math.round((fpsCount * 1000) / (now - lastFpsTime));
+        fpsCounter.innerText = `${fps} FPS`;
+        fpsCount = 0;
+        lastFpsTime = now;
+      }
+
+      if (isPlaying && !isWaitingRest) {
+        timeAcc += delta * playbackSpeed;
+        if (timeAcc >= frameDuration) {
+          const adv = Math.floor(timeAcc / frameDuration);
+          timeAcc %= frameDuration;
+          currentFrame += adv;
+
+          if (currentFrame >= TOTAL_FRAMES) {
+            onCycleEnd();
+          } else {
+            renderFrame(currentFrame);
+          }
+        }
+      }
+      requestAnimationFrame(loop);
+    }
+
+    function onCycleEnd() {
+      if (currentMode === 'loop-smooth') {
+        currentFrame = 0;
+        renderFrame(0);
+        playAudio();
+      } else if (currentMode === 'loop-pause') {
+        isWaitingRest = true;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        setTimeout(() => {
+          if (isPlaying && currentMode === 'loop-pause') {
+            currentFrame = 0;
+            isWaitingRest = false;
+            renderFrame(0);
+            playAudio();
+          }
+        }, 1000);
+      } else if (currentMode.startsWith('alert')) {
+        const seconds = parseInt(currentMode.split('-')[1]) || 30;
+        isWaitingRest = true;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        giftBanner.classList.remove('show');
+        setTimeout(() => {
+          if (isPlaying && currentMode.startsWith('alert')) {
+            triggerBurst();
+          }
+        }, seconds * 1000);
+      } else if (currentMode === 'manual') {
+        isPlaying = false;
+        currentFrame = 0;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        btnPlayPause.innerHTML = '<span>▶ Play</span>';
+      }
+    }
+
+    function triggerBurst() {
+      currentFrame = 0;
+      isWaitingRest = false;
+      isPlaying = true;
+      btnPlayPause.innerHTML = '<span>⏸ Pause</span>';
+      renderFrame(0);
+      playAudio();
+      giftBanner.classList.add('show');
+      setTimeout(() => giftBanner.classList.remove('show'), 3500);
+    }
+
+    // --- Position Presets ---
+    function applyPosition(pos) {
+      currentPos = pos;
+      wrapper.style.left = '';
+      wrapper.style.right = '';
+      wrapper.style.top = '';
+      wrapper.style.bottom = '';
+
+      switch (pos) {
+        case 'bottom-right':
+          wrapper.style.right = '40px';
+          wrapper.style.bottom = '40px';
+          wrapper.style.transform = `scale(${playbackScale})`;
+          wrapper.style.transformOrigin = 'bottom right';
+          break;
+        case 'bottom-center':
+          wrapper.style.left = '50%';
+          wrapper.style.bottom = '40px';
+          wrapper.style.transform = `translateX(-50%) scale(${playbackScale})`;
+          wrapper.style.transformOrigin = 'bottom center';
+          break;
+        case 'bottom-left':
+          wrapper.style.left = '40px';
+          wrapper.style.bottom = '40px';
+          wrapper.style.transform = `scale(${playbackScale})`;
+          wrapper.style.transformOrigin = 'bottom left';
+          break;
+        case 'top-right':
+          wrapper.style.right = '40px';
+          wrapper.style.top = '40px';
+          wrapper.style.transform = `scale(${playbackScale})`;
+          wrapper.style.transformOrigin = 'top right';
+          break;
+        case 'top-left':
+          wrapper.style.left = '40px';
+          wrapper.style.top = '40px';
+          wrapper.style.transform = `scale(${playbackScale})`;
+          wrapper.style.transformOrigin = 'top left';
+          break;
+        case 'center':
+        default:
+          wrapper.style.left = '50%';
+          wrapper.style.top = '50%';
+          wrapper.style.transform = `translate(-50%, -50%) scale(${playbackScale})`;
+          wrapper.style.transformOrigin = 'center center';
+          break;
+      }
+    }
+
+    // --- Interactive Drag ---
+    let isDragging = false, startX = 0, startY = 0, offX = 0, offY = 0;
+    wrapper.addEventListener('pointerdown', (e) => {
+      isDragging = true;
+      startX = e.clientX - offX;
+      startY = e.clientY - offY;
+      wrapper.setPointerCapture(e.pointerId);
+    });
+    wrapper.addEventListener('pointermove', (e) => {
+      if (!isDragging) return;
+      offX = e.clientX - startX;
+      offY = e.clientY - startY;
+      wrapper.style.left = `calc(50% + ${offX}px)`;
+      wrapper.style.top = `calc(50% + ${offY}px)`;
+      wrapper.style.transform = `translate(-50%, -50%) scale(${playbackScale})`;
+    });
+    wrapper.addEventListener('pointerup', (e) => {
+      isDragging = false;
+      wrapper.releasePointerCapture(e.pointerId);
+    });
+
+    // --- UI Listeners ---
+    btnPlayPause.addEventListener('click', () => {
+      isPlaying = !isPlaying;
+      btnPlayPause.innerHTML = isPlaying ? '<span>⏸ Pause</span>' : '<span>▶ Play</span>';
+      if (isPlaying && isWaitingRest) {
+        isWaitingRest = false;
+        currentFrame = 0;
+        playAudio();
+      }
+    });
+
+    btnReplay.addEventListener('click', triggerBurst);
+
+    modeSelect.addEventListener('change', (e) => { currentMode = e.target.value; });
+    posSelect.addEventListener('change', (e) => { applyPosition(e.target.value); });
+    fxSelect.addEventListener('change', (e) => { wrapper.className = e.target.value; });
+
+    speedSlider.addEventListener('input', (e) => {
+      playbackSpeed = parseFloat(e.target.value);
+      speedLabel.innerText = `Speed: ${playbackSpeed.toFixed(1)}x`;
+      if (audioTrack) audioTrack.playbackRate = playbackSpeed;
+    });
+
+    scaleSlider.addEventListener('input', (e) => {
+      playbackScale = parseFloat(e.target.value);
+      scaleLabel.innerText = `Scale: ${Math.round(playbackScale * 100)}%`;
+      applyPosition(currentPos);
+    });
+
+    btnAudio.addEventListener('click', () => {
+      audioEnabled = !audioEnabled;
+      audioLabel.innerText = audioEnabled ? '🔊 Audio On' : '🔇 Audio Off';
+      if (!audioEnabled && audioTrack) audioTrack.pause();
+    });
+
+    backdropSelect.addEventListener('change', (e) => {
+      backdropContainer.className = e.target.value;
+    });
+
+    // Auto-hide HUD if not in OBS Clean mode
+    if (!isObsMode) {
+      let timer = null;
+      let locked = false;
+      function resetTimer() {
+        if (locked) return;
+        hud.classList.remove('hidden');
+        tip.style.opacity = '1';
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+          if (!locked) {
+            hud.classList.add('hidden');
+            tip.style.opacity = '0';
+          }
+        }, 3000);
+      }
+      window.addEventListener('mousemove', resetTimer);
+      resetTimer();
+
+      window.addEventListener('keydown', (e) => {
+        if (e.key === 'h' || e.key === 'H') {
+          locked = !locked;
+          if (locked) {
+            hud.classList.add('hidden');
+            tip.style.opacity = '0';
+          } else {
+            resetTimer();
+          }
+        } else if (e.code === 'Space') {
+          e.preventDefault();
+          triggerBurst();
+        }
+      });
+    }
+
+    preloadFrames();
+  </script>
+</body>
+</html>
